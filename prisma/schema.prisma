@@ -1,0 +1,644 @@
+// Schema do Banco de Dados - Portal Microsoft 365
+// Gerado: 2025-11-06
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTENTICAÇÃO E USUÁRIOS
+// ============================================
+
+enum UserRole {
+  ADMIN
+  VENDEDOR
+  TECNICO
+  CLIENTE_RESPONSAVEL
+  CLIENTE_USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_ACTIVATION
+}
+
+model User {
+  id                String       @id @default(cuid())
+  email             String       @unique
+  name              String
+  password          String // bcrypt hash
+  role              UserRole
+  status            UserStatus   @default(PENDING_ACTIVATION)
+  emailVerified     DateTime?
+  image             String?
+  phone             String?
+
+  // MFA (Multi-Factor Authentication)
+  twoFactorEnabled  Boolean      @default(false)
+  twoFactorSecret   String?      @db.Text
+
+  // Relacionamentos
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Sessões e tokens
+  sessions          Session[]
+  accounts          Account[]
+
+  // Auditoria
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  lastLoginAt       DateTime?
+
+  // Atividades
+  createdTickets    Ticket[]     @relation("CreatedBy")
+  assignedTickets   Ticket[]     @relation("AssignedTo")
+  activities        Activity[]
+  proposals         Proposal[]
+  sales             Sale[]
+  auditLogs         AuditLog[]
+
+  @@index([email])
+  @@index([organizationId])
+  @@index([role])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  ipAddress    String?
+  userAgent    String?  @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// ORGANIZAÇÕES (CLIENTES)
+// ============================================
+
+enum OrganizationType {
+  PEQUENA_EMPRESA  // Até 50 usuários
+  MEDIA_EMPRESA    // 51-250 usuários
+  GRANDE_EMPRESA   // 251+ usuários
+}
+
+model Organization {
+  id              String             @id @default(cuid())
+  name            String
+  cnpj            String             @unique
+  email           String
+  phone           String
+  type            OrganizationType   @default(PEQUENA_EMPRESA)
+
+  // Endereço
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+
+  // Responsável comercial
+  salesRepId      String?
+  salesRep        User?              @relation("SalesRepOrganization", fields: [salesRepId], references: [id])
+
+  // Status
+  active          Boolean            @default(true)
+
+  // Relacionamentos
+  users           User[]
+  contracts       Contract[]
+  tickets         Ticket[]
+  projects        Project[]
+  sales           Sale[]
+  licenseRequests LicenseRequest[]
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([cnpj])
+  @@index([salesRepId])
+  @@map("organizations")
+}
+
+// ============================================
+// PRODUTOS E CONTRATOS
+// ============================================
+
+enum ProductCategory {
+  MICROSOFT_365_BUSINESS_BASIC
+  MICROSOFT_365_BUSINESS_STANDARD
+  MICROSOFT_365_BUSINESS_PREMIUM
+  MICROSOFT_365_E3
+  MICROSOFT_365_E5
+  EXCHANGE_ONLINE
+  SHAREPOINT_ONLINE
+  TEAMS
+  OUTROS
+}
+
+model Product {
+  id              String          @id @default(cuid())
+  name            String
+  category        ProductCategory
+  description     String?         @db.Text
+  sku             String          @unique
+
+  // Preços
+  unitPrice       Decimal         @db.Decimal(10, 2)
+  minimumQuantity Int             @default(1)
+
+  active          Boolean         @default(true)
+
+  // Relacionamentos
+  contractItems   ContractItem[]
+  saleItems       SaleItem[]
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([sku])
+  @@index([category])
+  @@map("products")
+}
+
+enum ContractStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+model Contract {
+  id              String         @id @default(cuid())
+  contractNumber  String         @unique
+
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  status          ContractStatus @default(ACTIVE)
+  startDate       DateTime
+  endDate         DateTime
+
+  // Valores
+  totalValue      Decimal        @db.Decimal(10, 2)
+
+  // Relacionamentos
+  items           ContractItem[]
+  tickets         Ticket[]
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@index([contractNumber])
+  @@index([status])
+  @@map("contracts")
+}
+
+model ContractItem {
+  id         String   @id @default(cuid())
+
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  quantity   Int
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  totalPrice Decimal  @db.Decimal(10, 2)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([contractId])
+  @@index([productId])
+  @@map("contract_items")
+}
+
+// ============================================
+// CHAMADOS (TICKETS)
+// ============================================
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CLIENT
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketCategory {
+  SUPORTE_TECNICO
+  CONFIGURACAO
+  MIGRACAO_EMAIL
+  SHAREPOINT
+  TREINAMENTO
+  OUTROS
+}
+
+model Ticket {
+  id              String         @id @default(cuid())
+  ticketNumber    String         @unique
+
+  title           String
+  description     String         @db.Text
+
+  status          TicketStatus   @default(OPEN)
+  priority        TicketPriority @default(MEDIUM)
+  category        TicketCategory
+
+  // Relacionamentos
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  contractId      String?
+  contract        Contract?      @relation(fields: [contractId], references: [id])
+
+  createdById     String
+  createdBy       User           @relation("CreatedBy", fields: [createdById], references: [id])
+
+  assignedToId    String?
+  assignedTo      User?          @relation("AssignedTo", fields: [assignedToId], references: [id])
+
+  // Timestamps
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+
+  // SLA
+  slaDeadline     DateTime?
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([priority])
+  @@index([ticketNumber])
+  @@map("tickets")
+}
+
+// ============================================
+// PROJETOS (GANTT)
+// ============================================
+
+enum ProjectStatus {
+  PLANNING
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+model Project {
+  id              String        @id @default(cuid())
+  name            String
+  description     String?       @db.Text
+
+  status          ProjectStatus @default(PLANNING)
+
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Datas
+  startDate       DateTime
+  endDate         DateTime
+  completedAt     DateTime?
+
+  // Progresso
+  progress        Int           @default(0) // 0-100
+
+  // Relacionamentos
+  tasks           ProjectTask[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectTask {
+  id          String    @id @default(cuid())
+
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?   @db.Text
+
+  startDate   DateTime
+  endDate     DateTime
+  completedAt DateTime?
+
+  progress    Int       @default(0) // 0-100
+
+  // Dependências (tarefas que devem ser completadas antes)
+  dependencies String[] // Array de IDs de tasks
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+  @@map("project_tasks")
+}
+
+// ============================================
+// VENDAS
+// ============================================
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Proposal {
+  id              String         @id @default(cuid())
+  proposalNumber  String         @unique
+
+  organizationId  String
+
+  vendedorId      String
+  vendedor        User           @relation(fields: [vendedorId], references: [id])
+
+  status          ProposalStatus @default(DRAFT)
+
+  title           String
+  description     String?        @db.Text
+
+  totalValue      Decimal        @db.Decimal(10, 2)
+
+  validUntil      DateTime
+  sentAt          DateTime?
+  respondedAt     DateTime?
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([vendedorId])
+  @@index([status])
+  @@index([proposalNumber])
+  @@map("proposals")
+}
+
+enum SaleStatus {
+  PENDING_APPROVAL
+  APPROVED
+  INVOICED
+  CANCELLED
+}
+
+model Sale {
+  id              String      @id @default(cuid())
+  saleNumber      String      @unique
+
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+
+  vendedorId      String
+  vendedor        User        @relation(fields: [vendedorId], references: [id])
+
+  status          SaleStatus  @default(PENDING_APPROVAL)
+
+  totalValue      Decimal     @db.Decimal(10, 2)
+
+  // Datas
+  saleDate        DateTime    @default(now())
+  approvedAt      DateTime?
+  invoicedAt      DateTime?
+
+  // Relacionamentos
+  items           SaleItem[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([organizationId])
+  @@index([vendedorId])
+  @@index([status])
+  @@index([saleNumber])
+  @@map("sales")
+}
+
+model SaleItem {
+  id         String  @id @default(cuid())
+
+  saleId     String
+  sale       Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  productId  String
+  product    Product @relation(fields: [productId], references: [id])
+
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(10, 2)
+  totalPrice Decimal @db.Decimal(10, 2)
+
+  createdAt  DateTime @default(now())
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
+}
+
+// ============================================
+// ATIVIDADES (VENDEDORES)
+// ============================================
+
+enum ActivityType {
+  LEAD_INBOUND
+  LEAD_OUTBOUND
+  AVALIACAO_CLIENTE
+  LIGACAO_PROSPECCAO
+  REUNIAO
+  FOLLOW_UP
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+
+  type        ActivityType
+
+  vendedorId  String
+  vendedor    User         @relation(fields: [vendedorId], references: [id])
+
+  title       String
+  description String?      @db.Text
+
+  // Cliente relacionado (se houver)
+  organizationId String?
+
+  // Data da atividade
+  activityDate DateTime   @default(now())
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([vendedorId])
+  @@index([type])
+  @@index([activityDate])
+  @@map("activities")
+}
+
+// ============================================
+// SOLICITAÇÕES DE LICENÇAS EXTRAS
+// ============================================
+
+enum LicenseRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+model LicenseRequest {
+  id              String               @id @default(cuid())
+  requestNumber   String               @unique
+
+  organizationId  String
+  organization    Organization         @relation(fields: [organizationId], references: [id])
+
+  productSku      String
+  quantity        Int
+  justification   String               @db.Text
+
+  status          LicenseRequestStatus @default(PENDING)
+
+  // Aprovação
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedReason  String?
+
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([requestNumber])
+  @@map("license_requests")
+}
+
+// ============================================
+// AUDITORIA E LOGS
+// ============================================
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ACCESS
+  APPROVE
+  REJECT
+  EXPORT
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+
+  action      AuditAction
+  resource    String      // Ex: "Contract", "User", "Ticket"
+  resourceId  String?     // ID do recurso afetado
+
+  // Detalhes
+  ipAddress   String
+  userAgent   String      @db.Text
+  metadata    Json?       // Dados adicionais em JSON
+
+  createdAt   DateTime    @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// MÉTRICAS DE DESEMPENHO
+// ============================================
+
+model PerformanceMetric {
+  id                  String   @id @default(cuid())
+
+  // Métricas de técnicos
+  userId              String?  // Se for métrica individual
+
+  // Período
+  date                DateTime @default(now())
+
+  // Tickets
+  ticketsResolved     Int      @default(0)
+  ticketsCreated      Int      @default(0)
+  avgResolutionTime   Float?   // Em horas
+
+  // Projetos
+  projectsCompleted   Int      @default(0)
+  avgProjectDelay     Float?   // Em dias
+
+  // Vendas (para vendedores)
+  salesCount          Int      @default(0)
+  salesValue          Decimal? @db.Decimal(10, 2)
+
+  createdAt           DateTime @default(now())
+
+  @@index([userId])
+  @@index([date])
+  @@map("performance_metrics")
+}

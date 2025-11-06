@@ -95,17 +95,22 @@ export function Sidebar({ userRole }: SidebarProps) {
   const filteredItems = navItems.filter(item => item.roles.includes(userRole));
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
-      <div className="flex h-14 items-center border-b px-4">
-        <Link href="/" className="flex items-center space-x-2">
-          <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold">
-            M365
+    <div className="flex h-full w-64 flex-col border-r bg-card/50 backdrop-blur-sm">
+      {/* Logo */}
+      <div className="flex h-16 items-center px-6 border-b">
+        <Link href="/" className="flex items-center space-x-3">
+          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center shadow-sm">
+            <span className="text-white font-bold text-sm">M</span>
           </div>
-          <span className="text-lg font-semibold">Portal M365</span>
+          <div>
+            <p className="text-sm font-semibold leading-none">Portal M365</p>
+            <p className="text-xs text-muted-foreground">Gestão de Licenças</p>
+          </div>
         </Link>
       </div>
 
-      <nav className="flex-1 space-y-1 p-4">
+      {/* Navigation */}
+      <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
         {filteredItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
@@ -115,25 +120,26 @@ export function Sidebar({ userRole }: SidebarProps) {
               key={item.href}
               href={item.href}
               className={cn(
-                'flex items-center space-x-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                'flex items-center space-x-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
                 isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  ? 'bg-gray-900 text-white shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
               )}
             >
-              <Icon className="h-5 w-5" />
+              <Icon className={cn('h-4 w-4', isActive && 'text-white')} />
               <span>{item.title}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t p-4">
+      {/* Footer */}
+      <div className="border-t p-3 bg-gray-50/50">
         <button
           onClick={() => {/* Handle logout */}}
-          className="flex w-full items-center space-x-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex w-full items-center space-x-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 transition-all hover:bg-red-50 hover:text-red-600"
         >
-          <LogOut className="h-5 w-5" />
+          <LogOut className="h-4 w-4" />
           <span>Sair</span>
         </button>
       </div>
